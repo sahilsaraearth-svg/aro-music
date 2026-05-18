@@ -1,0 +1,219 @@
+package com.aro.music.presentation.viewmodel
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.aro.music.data.database.MusicDao
+import com.aro.music.data.database.toArtist
+import com.aro.music.data.model.Artist
+import com.aro.music.data.model.Song
+import com.aro.music.data.service.wear.PhoneWatchTransferState
+import com.aro.music.data.service.wear.PhoneWatchTransferStateStore
+import com.aro.music.data.service.wear.WearPhoneTransferSender
+import com.aro.music.shared.WearTransferProgress
+import com.aro.music.utils.AudioMeta
+import com.aro.music.utils.AudioMetaUtils
+import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.File
+import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+@HiltViewModel
+class SongInfoBottomSheetViewModel @Inject constructor(
+    private val wearPhoneTransferSender: WearPhoneTransferSender,
+    private val transferStateStore: PhoneWatchTransferStateStore,
+    private val musicDao: MusicDao,
+) : ViewModel() {
+
+    data class SongLocationInfo(
+        val label: String,
+        val value: String,
+        val isCloud: Boolean,
+    )
+
+    private val _audioMeta = MutableStateFlow<AudioMeta?>(null)
+    private val _resolvedArtists = MutableStateFlow<List<Artist>>(emptyList())
+    val resolvedArtists: StateFlow<List<Artist>> = _resolvedArtists.asStateFlow()
+    private val _isAroWatchAvailable = MutableStateFlow(false)
+    val isAroWatchAvailable: StateFlow<Boolean> = _isAroWatchAvailable.asStateFlow()
+    private val _isWatchAvailabilityResolved = MutableStateFlow(false)
+    val isWatchAvailabilityResolved: StateFlow<Boolean> = _isWatchAvailabilityResolved.asStateFlow()
+    private val _isRefreshingWatchAvailability = MutableStateFlow(false)
+
+    private val _isRequestingToWatch = MutableStateFlow(false)
+    val watchTransfers: StateFlow<Map<String, PhoneWatchTransferState>> = transferStateStore.transfers
+    val watchSongIds: StateFlow<Set<String>> = transferStateStore.watchSongIds
+    val reachableWatchNodeIds: StateFlow<Set<String>> = transferStateStore.reachableWatchNodeIds
+    val isWatchLibraryResolved: StateFlow<Boolean> = transferStateStore.isWatchLibraryResolved
+    val activeWatchTransfer: StateFlow<PhoneWatchTransferState?> = watchTransfers
+        .map { transfers ->
+            transfers.values
+                .asSequence()
+                .filter { it.status == WearTransferProgress.STATUS_TRANSFERRING }
+                .maxByOrNull { it.updatedAtMillis }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = null,
+        )
+    val isSendingToWatch: StateFlow<Boolean> = combine(
+        _isRequestingToWatch,
+        activeWatchTransfer
+    ) { isRequesting, activeTransfer ->
+        isRequesting || activeTransfer != null
+    }.distinctUntilChanged()
+        .stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000L),
+        initialValue = false,
+    )
+
+    val audioMeta: StateFlow<AudioMeta?> = _audioMeta.asStateFlow()
+
+    fun loadArtistsForSong(song: Song) {
+        val refs = song.artists
+        if (refs.isEmpty() || refs.size < 2) {
+            _resolvedArtists.value = emptyList()
+            return
+        }
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val ids = refs.map { it.id }.filter { it > 0L }.distinct()
+            val entitiesById = if (ids.isNotEmpty()) {
+                musicDao.getArtistsByIds(ids).associateBy { it.id }
+            } else {
+                emptyMap()
+            }
+            val resolved = refs.map { ref ->
+                entitiesById[ref.id]?.toArtist()
+                    ?: Artist(id = ref.id, name = ref.name, songCount = 0)
+            }
+            _resolvedArtists.value = resolved
+        }
+    }
+
+    fun loadAudioMeta(song: Song) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val meta = AudioMetaUtils.getAudioMetadata(
+                musicDao = musicDao,
+                id = song.id.toLongOrNull() ?: -1L,
+                filePath = song.path,
+                deepScan = false
+            )
+            _audioMeta.value = meta
+        }
+    }
+
+    fun getSongLocationInfo(song: Song): SongLocationInfo {
+        val provider = getCloudProviderLabel(song.contentUriString)
+        return if (provider != null) {
+            SongLocationInfo(
+                label = "Provider",
+                value = provider,
+                isCloud = true,
+            )
+        } else {
+            SongLocationInfo(
+                label = "Path",
+                value = song.path,
+                isCloud = false,
+            )
+        }
+    }
+
+    fun refreshWatchAvailability() {
+        if (_isRefreshingWatchAvailability.value) return
+
+        viewModelScope.launch {
+            _isRefreshingWatchAvailability.value = true
+            val available = wearPhoneTransferSender.isAroWatchAvailable()
+            _isAroWatchAvailable.value = available
+            _isWatchAvailabilityResolved.value = true
+            _isRefreshingWatchAvailability.value = false
+            if (available) {
+                viewModelScope.launch {
+                    wearPhoneTransferSender.refreshWatchLibraryState()
+                }
+            }
+        }
+    }
+
+    fun isLocalSongForWatchTransfer(song: Song): Boolean {
+        if (getCloudProviderLabel(song.contentUriString) != null) return false
+
+        if (song.path.isNotBlank()) {
+            return File(song.path).exists()
+        }
+
+        val uri = song.contentUriString
+        return uri.startsWith("content://") || uri.startsWith("file://")
+    }
+
+    fun sendSongToWatch(song: Song, onComplete: (String) -> Unit) {
+        if (_isRequestingToWatch.value) return
+
+        viewModelScope.launch {
+            if (!isLocalSongForWatchTransfer(song)) {
+                onComplete("Only local songs can be sent to watch")
+                return@launch
+            }
+            if (!_isAroWatchAvailable.value) {
+                onComplete("No reachable watch with Aro")
+                refreshWatchAvailability()
+                return@launch
+            }
+            if (transferStateStore.isSongSavedOnAllReachableWatches(song.id)) {
+                onComplete(WearTransferProgress.ERROR_ALREADY_ON_WATCH)
+                return@launch
+            }
+
+            _isRequestingToWatch.update { true }
+            val result = wearPhoneTransferSender.requestSongTransfer(song.id, song.title)
+            _isRequestingToWatch.update { false }
+
+            if (result.isSuccess) {
+                val nodeCount = result.getOrNull() ?: 1
+                onComplete(
+                    if (nodeCount > 1) {
+                        "Transfer requested on $nodeCount watches"
+                    } else {
+                        "Transfer requested on watch"
+                    }
+                )
+            } else {
+                onComplete(result.exceptionOrNull()?.message ?: "Failed to request transfer")
+                refreshWatchAvailability()
+            }
+        }
+    }
+
+    fun cancelWatchTransfer(requestId: String) {
+        if (requestId.isBlank()) return
+        viewModelScope.launch {
+            wearPhoneTransferSender.cancelTransfer(requestId)
+        }
+    }
+
+    fun isSongSavedOnAllReachableWatches(songId: String): Boolean {
+        return transferStateStore.isSongSavedOnAllReachableWatches(songId)
+    }
+
+    private fun getCloudProviderLabel(contentUriString: String): String? {
+        return when {
+            contentUriString.startsWith("telegram://") -> "Telegram"
+            contentUriString.startsWith("netease://") -> "Netease Music"
+            contentUriString.startsWith("qqmusic://") -> "QQ Music"
+            contentUriString.startsWith("navidrome://") -> "Navidrome"
+            contentUriString.startsWith("gdrive://") -> "Google Drive"
+            else -> null
+        }
+    }
+}
