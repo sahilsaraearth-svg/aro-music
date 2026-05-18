@@ -1169,6 +1169,23 @@ class PlayerViewModel @Inject constructor(
     val homeMixPreviewSongs: StateFlow<ImmutableList<Song>> = _homeMixPreviewSongs.asStateFlow()
     private var homeMixJob: kotlinx.coroutines.Job? = null
 
+    // ── Debug state ──────────────────────────────────────────────────────────
+    private val _debugInfo = MutableStateFlow(com.aro.music.presentation.debug.DebugInfo())
+    val debugInfo: StateFlow<com.aro.music.presentation.debug.DebugInfo> = _debugInfo.asStateFlow()
+
+    private fun addDebugEvent(
+        source: String,
+        status: com.aro.music.presentation.debug.DebugStatus,
+        detail: String
+    ) {
+        val current = _debugInfo.value
+        val newEvent = com.aro.music.presentation.debug.DebugApiEvent(source, status, detail)
+        _debugInfo.value = current.copy(
+            events = (current.events + newEvent).takeLast(30)
+        )
+    }
+    // ── End debug state ──────────────────────────────────────────────────────
+
     fun reloadHomeMixFromApi() {
         if (homeMixJob?.isActive == true) return  // already running, don't cancel
         loadHomeMixFromApi()
@@ -1180,22 +1197,52 @@ class PlayerViewModel @Inject constructor(
             var attempt = 0
             val maxAttempts = 5
             val retryDelayMs = 5_000L
+            _debugInfo.value = _debugInfo.value.copy(
+                homeMixAttempt = 0,
+                homeMixJobActive = true,
+                homeMixLastError = null
+            )
             while (attempt < maxAttempts && _homeMixPreviewSongs.value.isEmpty()) {
                 attempt++
+                _debugInfo.value = _debugInfo.value.copy(homeMixAttempt = attempt)
+                addDebugEvent("JioSaavn", com.aro.music.presentation.debug.DebugStatus.LOADING,
+                    "getTrendingSongs attempt $attempt/$maxAttempts")
                 try {
                     Timber.d("loadHomeMixFromApi: attempt $attempt")
                     val songs = streamingRepository.getTrendingSongs(limit = 50)
                     if (songs.isNotEmpty()) {
                         _homeMixPreviewSongs.value = songs.take(HOME_MIX_PREVIEW_LIMIT).toImmutableList()
+                        _debugInfo.value = _debugInfo.value.copy(
+                            homeMixSongsLoaded = songs.size,
+                            homeMixJobActive = false,
+                            homeMixLastError = null
+                        )
+                        addDebugEvent("JioSaavn", com.aro.music.presentation.debug.DebugStatus.SUCCESS,
+                            "Loaded ${songs.size} songs on attempt $attempt")
                         Timber.d("loadHomeMixFromApi: loaded ${songs.size} songs on attempt $attempt")
                         return@launch
                     } else {
+                        _debugInfo.value = _debugInfo.value.copy(
+                            homeMixSongsLoaded = 0,
+                            homeMixLastError = "Empty result on attempt $attempt"
+                        )
+                        addDebugEvent("JioSaavn", com.aro.music.presentation.debug.DebugStatus.EMPTY,
+                            "0 songs returned on attempt $attempt")
                         Timber.w("loadHomeMixFromApi: empty result on attempt $attempt")
                     }
                 } catch (e: Exception) {
+                    val errMsg = "${e.javaClass.simpleName}: ${e.message?.take(80)}"
+                    _debugInfo.value = _debugInfo.value.copy(homeMixLastError = errMsg)
+                    addDebugEvent("JioSaavn", com.aro.music.presentation.debug.DebugStatus.ERROR,
+                        "Attempt $attempt failed — $errMsg")
                     Timber.w(e, "loadHomeMixFromApi: attempt $attempt failed — ${e.javaClass.simpleName}")
                 }
                 if (attempt < maxAttempts) delay(retryDelayMs)
+            }
+            _debugInfo.value = _debugInfo.value.copy(homeMixJobActive = false)
+            if (_homeMixPreviewSongs.value.isEmpty()) {
+                addDebugEvent("HomeMix", com.aro.music.presentation.debug.DebugStatus.ERROR,
+                    "All $maxAttempts attempts failed — no songs loaded")
             }
             Timber.e("loadHomeMixFromApi: all $maxAttempts attempts failed")
         }
