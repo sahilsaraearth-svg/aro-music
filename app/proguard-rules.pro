@@ -60,6 +60,8 @@
 # Mantener clases de datos y sus miembros para evitar que R8 Full elimine campos
 -keepclassmembers class com.theveloper.playpix.data.model.** { *; }
 -keepclassmembers class com.theveloper.playpix.domain.model.** { *; }
+-keepclassmembers class com.aro.music.data.model.** { *; }
+-keepclassmembers class com.aro.music.domain.model.** { *; }
 
 -keepattributes Signature, InnerClasses, EnclosingMethod, AnnotationDefault, *Annotation*
 
@@ -220,3 +222,24 @@
 -keep class java.sql.** { *; }
 -dontwarn java.sql.**
 -keep class com.google.gson.internal.sql.** { *; }
+
+# =============================================================================
+# com.aro.music — ALL data/model/network classes kept for Gson + Hilt + Retrofit
+# Without these, R8 obfuscates field names and Gson returns empty/null objects
+# =============================================================================
+-keep class com.aro.music.data.jiosaavn.** { *; }
+-keep class com.aro.music.data.itunes.** { *; }
+-keep class com.aro.music.data.streaming.** { *; }
+-keep class com.aro.music.data.model.** { *; }
+-keep class com.aro.music.data.database.** { *; }
+-keep class com.aro.music.data.preferences.** { *; }
+-keep class com.aro.music.data.backup.** { *; }
+-keep class com.aro.music.data.telegram.** { *; }
+-keep class com.aro.music.data.soundcloud.** { *; }
+-keep class com.aro.music.data.network.** { *; }
+-keep class com.aro.music.data.gdrive.** { *; }
+-keep class com.aro.music.data.ai.** { *; }
+-keep class com.aro.music.data.service.** { *; }
+-keepclassmembers class com.aro.music.data.model.** { *; }
+-keepclassmembers class com.aro.music.data.jiosaavn.** { *; }
+-keepclassmembers class com.aro.music.data.itunes.** { *; }
