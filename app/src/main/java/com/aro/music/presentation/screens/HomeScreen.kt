@@ -110,8 +110,6 @@ import com.aro.music.presentation.telegram.auth.TelegramLoginActivity
 import com.aro.music.presentation.viewmodel.PlayerViewModel
 import com.aro.music.presentation.viewmodel.SettingsViewModel
 import com.aro.music.presentation.viewmodel.StatsViewModel
-import com.aro.music.presentation.debug.DebugOverlay
-import com.aro.music.presentation.debug.DebugInfo
 import com.aro.music.ui.theme.ExpTitleTypography
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -150,7 +148,6 @@ fun HomeScreen(
     val curatedYourMixSongs by playerViewModel.yourMixSongs.collectAsStateWithLifecycle()
     val homeMixPreviewSongs by playerViewModel.homeMixPreviewSongs.collectAsStateWithLifecycle()
     val playbackHistory by playerViewModel.playbackHistory.collectAsStateWithLifecycle()
-    val debugInfo by playerViewModel.debugInfo.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val usesFallbackHomeMix = remember(curatedYourMixSongs, dailyMixSongs) {
@@ -540,28 +537,6 @@ fun HomeScreen(
         }
     }
     // ── DEBUG OVERLAY (remove when done) ─────────────────────────────────────
-    androidx.compose.foundation.layout.Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(top = 56.dp),
-        contentAlignment = Alignment.TopCenter
-    ) {
-        // Inject live UI state into debugInfo so Layer 7 is accurate
-        val enrichedDebug = debugInfo.copy(
-            uiHomeMixPreviewCount = homeMixPreviewSongs.size,
-            uiYourMixCount = yourMixSongs.size,
-            uiDailyMixCount = dailyMixSongs.size,
-            uiShouldShowLoading = shouldShowYourMixLoadingPlaceholder,
-            uiShouldShowEmpty = yourMixSongs.isEmpty() && hasHomeLoadingMinimumElapsed,
-            uiMinimumElapsed = hasHomeLoadingMinimumElapsed
-        )
-        DebugOverlay(
-            debugInfo = enrichedDebug,
-            onRetry = { playerViewModel.reloadHomeMixFromApi() },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-        )
-    }
-    // ── END DEBUG OVERLAY ─────────────────────────────────────────────────────
 
     if (showChangelogBottomSheet) {
         ModalBottomSheet(

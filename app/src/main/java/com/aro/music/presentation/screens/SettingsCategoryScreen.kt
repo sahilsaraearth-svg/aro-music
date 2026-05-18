@@ -221,9 +221,7 @@ fun SettingsCategoryScreen(
     var showRegenerateStatsDialog by remember { mutableStateOf(false) }
     var showRegenerateAllPalettesDialog by remember { mutableStateOf(false) }
     var showExportDataDialog by remember { mutableStateOf(false) }
-    var showImportFlow by remember { mutableStateOf(false) }
     var exportSections by remember { mutableStateOf(BackupSection.defaultSelection) }
-    var importFileUri by remember { mutableStateOf<Uri?>(null) }
     var minSongDurationDraft by remember(uiState.minSongDuration) {
         mutableStateOf(uiState.minSongDuration.toFloat())
     }
@@ -242,14 +240,6 @@ fun SettingsCategoryScreen(
         }
     }
 
-    val importFilePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            importFileUri = uri
-            settingsViewModel.inspectBackupFile(uri)
-        }
-    }
 
     LaunchedEffect(Unit) {
         settingsViewModel.dataTransferEvents.collectLatest { message ->
@@ -400,16 +390,6 @@ fun SettingsCategoryScreen(
                         SettingsCategory.LIBRARY -> {
                             SettingsSubsection(title = stringResource(R.string.setcat_library_structure)) {
                                 SettingsItem(
-                                    title = stringResource(R.string.setcat_excluded_directories_title),
-                                    subtitle = stringResource(R.string.setcat_excluded_directories_subtitle),
-                                    leadingIcon = { Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.secondary) },
-                                    trailingIcon = { Icon(Icons.Rounded.ChevronRight, stringResource(R.string.cd_open), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                    onClick = {
-                                        showExplorerSheet = true
-                                        settingsViewModel.openExplorer()
-                                    }
-                                )
-                                SettingsItem(
                                     title = stringResource(R.string.setcat_artists_title),
                                     subtitle = stringResource(R.string.setcat_artists_subtitle),
                                     leadingIcon = { Icon(Icons.Outlined.Person, null, tint = MaterialTheme.colorScheme.secondary) },
@@ -420,38 +400,10 @@ fun SettingsCategoryScreen(
 
                             SettingsSubsection(title = stringResource(R.string.setcat_filtering)) {
                                 SliderSettingsItem(
-                                    label = stringResource(R.string.setcat_min_song_duration),
-                                    value = minSongDurationDraft,
-                                    valueRange = 0f..120000f,
-                                    steps = 23, // 0, 5, 10, 15, ... 120 seconds (24 positions, 23 steps)
-                                    onValueChange = { minSongDurationDraft = it },
-                                    onValueChangeFinished = {
-                                        val selectedDuration = minSongDurationDraft.toInt()
-                                        if (selectedDuration != uiState.minSongDuration) {
-                                            settingsViewModel.setMinSongDuration(selectedDuration)
-                                        }
-                                    },
-                                    valueText = { value -> "${(value / 1000).toInt()}s" }
-                                )
-                                SliderSettingsItem(
-                                    label = stringResource(R.string.setcat_min_tracks_per_album),
-                                    value = minTracksPerAlbumDraft,
-                                    valueRange = 1f..5f,
-                                    steps = 3, // 1, 2, 3, 4, 5
-                                    onValueChange = { minTracksPerAlbumDraft = it },
-                                    onValueChangeFinished = {
-                                        val selectedTracks = minTracksPerAlbumDraft.toInt()
-                                        if (selectedTracks != uiState.minTracksPerAlbum) {
-                                            settingsViewModel.setMinTracksPerAlbum(selectedTracks)
-                                        }
-                                    },
-                                    valueText = { value -> "${value.toInt()}" }
-                                )
-                                SliderSettingsItem(
                                     label = stringResource(R.string.setcat_album_art_cache_limit),
                                     value = albumArtCacheLimitDraft,
                                     valueRange = 50f..1500f,
-                                    steps = 28, // 50, 100, 150, ... 1500 (30 stops)
+                                    steps = 28,
                                     onValueChange = { albumArtCacheLimitDraft = it },
                                     onValueChangeFinished = {
                                         val selectedLimit = albumArtCacheLimitDraft.toInt()
@@ -460,33 +412,6 @@ fun SettingsCategoryScreen(
                                         }
                                     },
                                     valueText = { value -> "${value.toInt()} MB" }
-                                )
-                            }
-
-                            SettingsSubsection(title = stringResource(R.string.setcat_sync_scanning)) {
-                                RefreshLibraryItem(
-                                    isSyncing = isSyncing,
-                                    syncProgress = syncProgress,
-                                    activeOperationLabel = if (isSyncing) syncIndicatorLabel else null,
-                                    onFullSync = {
-                                        if (isSyncing) return@RefreshLibraryItem
-                                        refreshRequested = true
-                                        syncRequestObservedRunning = false
-                                        syncIndicatorLabel = context.getString(R.string.setcat_sync_full_rescan_label)
-                                        Toast.makeText(context, context.getString(R.string.toast_full_rescan_started), Toast.LENGTH_SHORT).show()
-                                        settingsViewModel.fullSyncLibrary()
-                                    },
-                                    onRebuild = {
-                                        if (isSyncing) return@RefreshLibraryItem
-                                        showRebuildDatabaseWarning = true
-                                    }
-                                )
-                                SwitchSettingItem(
-                                    title = stringResource(R.string.setcat_auto_scan_lrc_title),
-                                    subtitle = stringResource(R.string.setcat_auto_scan_lrc_subtitle),
-                                    checked = uiState.autoScanLrcFiles,
-                                    onCheckedChange = { settingsViewModel.setAutoScanLrcFiles(it) },
-                                    leadingIcon = { Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                             }
 
@@ -833,23 +758,6 @@ fun SettingsCategoryScreen(
                         }
                         SettingsCategory.BEHAVIOR -> {
                             SettingsSubsection(
-                                title = stringResource(R.string.setcat_folders)
-                            ) {
-                                SwitchSettingItem(
-                                    title = stringResource(R.string.setcat_folder_back_gesture_title),
-                                    subtitle = stringResource(R.string.setcat_folder_back_gesture_subtitle),
-                                    checked = uiState.folderBackGestureNavigation,
-                                    onCheckedChange = { settingsViewModel.setFolderBackGestureNavigation(it) },
-                                    leadingIcon = {
-                                        Icon(
-                                            painterResource(R.drawable.rounded_touch_app_24),
-                                            null,
-                                            tint = MaterialTheme.colorScheme.secondary
-                                        )
-                                    }
-                                )
-                            }
-                            SettingsSubsection(
                                 title = stringResource(R.string.setcat_player_gestures)
                             ) {
                                 SwitchSettingItem(
@@ -1122,25 +1030,7 @@ fun SettingsCategoryScreen(
                                 )
                             }
 
-                            SettingsSubsection(
-                                title = stringResource(R.string.setcat_restore_backup_section),
-                                addBottomSpace = false
-                            ) {
-                                ActionSettingsItem(
-                                    title = stringResource(R.string.setcat_import_backup_title),
-                                    subtitle = stringResource(R.string.setcat_import_backup_subtitle),
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Restore,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.secondary
-                                        )
-                                    },
-                                    primaryActionLabel = stringResource(R.string.setcat_select_restore),
-                                    onPrimaryAction = { showImportFlow = true },
-                                    enabled = !uiState.isDataTransferInProgress
-                                )
-                            }
+
                         }
                         SettingsCategory.DEVELOPER -> {
                             SettingsSubsection(title = stringResource(R.string.setcat_experiments)) {
@@ -1557,50 +1447,8 @@ fun SettingsCategoryScreen(
         )
     }
 
-    if (showImportFlow) {
-        val restorePlan = uiState.restorePlan
-        if (restorePlan != null && importFileUri != null) {
-            // Step 2: Module selection from inspected backup
-            ImportModuleSelectionDialog(
-                plan = restorePlan,
-                inProgress = uiState.isDataTransferInProgress,
-                onDismiss = {
-                    showImportFlow = false
-                    importFileUri = null
-                    settingsViewModel.clearRestorePlan()
-                },
-                onBack = {
-                    importFileUri = null
-                    settingsViewModel.clearRestorePlan()
-                },
-                onSelectionChanged = { settingsViewModel.updateRestorePlanSelection(it) },
-                onConfirm = {
-                    settingsViewModel.restoreFromPlan(importFileUri!!)
-                    showImportFlow = false
-                    importFileUri = null
-                }
-            )
-        } else {
-            // Step 1: File selection with backup history
-            ImportFileSelectionDialog(
-                backupHistory = uiState.backupHistory,
-                isInspecting = uiState.isInspectingBackup,
-                onDismiss = {
-                    showImportFlow = false
-                    importFileUri = null
-                    settingsViewModel.clearRestorePlan()
-                },
-                onBrowseFile = { importFilePicker.launch("*/*") },
-                onHistoryItemSelected = { entry ->
-                    val uri = entry.uri.toUri()
-                    importFileUri = uri
-                    settingsViewModel.inspectBackupFile(uri)
-                },
-                onRemoveHistoryEntry = { settingsViewModel.removeBackupHistoryEntry(it) }
-            )
-        }
-    }
 }
+
 
 private fun buildBackupSelectionSummary(context: Context, selected: Set<BackupSection>): String {
     if (selected.isEmpty()) return context.getString(R.string.backup_summary_none)

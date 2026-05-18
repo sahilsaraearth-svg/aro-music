@@ -12,7 +12,7 @@ enum class LibraryTabId(
     ALBUMS("ALBUMS", "ALBUMS", SortOption.AlbumTitleAZ),
     ARTISTS("ARTIST", "ARTIST", SortOption.ArtistNameAZ),
     PLAYLISTS("PLAYLISTS", "PLAYLISTS", SortOption.PlaylistNameAZ),
-    FOLDERS("FOLDERS", "FOLDERS", SortOption.FolderNameAZ),
+    FOLDERS("FOLDERS", "ARTISTS", SortOption.ArtistNameAZ),
     LIKED("LIKED", "LIKED", SortOption.LikedSongDateLiked);
 
     companion object {

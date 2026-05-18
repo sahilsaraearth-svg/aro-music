@@ -688,19 +688,13 @@ fun LibraryScreen(
                 LibraryTabId.PLAYLISTS -> isPlaylistSelectionMode
                 LibraryTabId.ALBUMS -> isAlbumSelectionMode
                 LibraryTabId.SONGS,
-                LibraryTabId.LIKED,
-                LibraryTabId.FOLDERS -> isSelectionMode
+                LibraryTabId.LIKED -> isSelectionMode
+                LibraryTabId.FOLDERS,
                 LibraryTabId.ARTISTS -> false
             }
         }
     }
-    val canHandleFolderBack by remember {
-        derivedStateOf {
-            currentTabId == LibraryTabId.FOLDERS &&
-                    canNavigateBackInFolders &&
-                    !isSortSheetVisible
-        }
-    }
+    val canHandleFolderBack = false
 
     BackHandler(enabled = hasSelectionInCurrentTab || canHandleFolderBack) {
         when {
@@ -719,12 +713,12 @@ fun LibraryScreen(
                     }
 
                     LibraryTabId.SONGS,
-                    LibraryTabId.LIKED,
-                    LibraryTabId.FOLDERS -> {
+                    LibraryTabId.LIKED -> {
                         multiSelectionState.clearSelection()
                         showMultiSelectionSheet = false
                     }
 
+                    LibraryTabId.FOLDERS,
                     LibraryTabId.ARTISTS -> Unit
                 }
             }
@@ -1138,19 +1132,17 @@ fun LibraryScreen(
                             LibraryTabId.ARTISTS -> playerUiState.currentArtistSortOption
                             LibraryTabId.PLAYLISTS -> playlistUiState.currentPlaylistSortOption
                             LibraryTabId.LIKED -> playerUiState.currentFavoriteSortOption
-                            LibraryTabId.FOLDERS -> playerUiState.currentFolderSortOption
+                            LibraryTabId.FOLDERS -> playerUiState.currentArtistSortOption
                         }
 
                         val showLocateButton = when (currentTabId) {
                             LibraryTabId.SONGS -> songsShowLocateButton
                             LibraryTabId.LIKED -> likedShowLocateButton
-                            LibraryTabId.FOLDERS -> foldersShowLocateButton
                             else -> false
                         }
                         val locateAction = when (currentTabId) {
                             LibraryTabId.SONGS -> songsLocateAction
                             LibraryTabId.LIKED -> likedLocateAction
-                            LibraryTabId.FOLDERS -> foldersLocateAction
                             else -> null
                         }
 
@@ -1159,10 +1151,10 @@ fun LibraryScreen(
                                 when (currentTabId) {
                                     LibraryTabId.SONGS -> playerViewModel.sortSongs(option)
                                     LibraryTabId.ALBUMS -> playerViewModel.sortAlbums(option)
-                                    LibraryTabId.ARTISTS -> playerViewModel.sortArtists(option)
+                                    LibraryTabId.ARTISTS,
+                                    LibraryTabId.FOLDERS -> playerViewModel.sortArtists(option)
                                     LibraryTabId.PLAYLISTS -> playlistViewModel.sortPlaylists(option)
                                     LibraryTabId.LIKED -> playerViewModel.sortFavoriteSongs(option)
-                                    LibraryTabId.FOLDERS -> playerViewModel.sortFolders(option)
                                 }
                             }
                         }
@@ -1227,11 +1219,6 @@ fun LibraryScreen(
                                                 LibraryTabId.LIKED -> {
                                                     multiSelectionState.selectAll(favoritePagingItems.itemSnapshotList.items)
                                                 }
-                                                LibraryTabId.FOLDERS -> {
-                                                    val songsToSelect =
-                                                        playerViewModel.playerUiState.value.currentFolder?.songs ?: emptyList()
-                                                    multiSelectionState.selectAll(songsToSelect)
-                                                }
                                                 LibraryTabId.SONGS -> {
                                                     scope.launch {
                                                         val songsToSelect =
@@ -1266,7 +1253,7 @@ fun LibraryScreen(
                                     onSortClick = { playerViewModel.showSortingSheet() },
                                     onLocateClick = { locateAction?.invoke() },
                                     isPlaylistTab = currentTabId == LibraryTabId.PLAYLISTS,
-                                    isFoldersTab = currentTabId == LibraryTabId.FOLDERS && (!playerUiState.isFoldersPlaylistView || playerUiState.currentFolder != null),
+                                    isFoldersTab = false,
                                     onImportM3uClick = { m3uImportLauncher.launch("audio/x-mpegurl") },
                                     currentFolder = playerUiState.currentFolder,
                                     folderRootPath = playerUiState.folderSourceRootPath.ifBlank {
@@ -1279,8 +1266,8 @@ fun LibraryScreen(
                                     showStorageFilterButton = currentTabId == LibraryTabId.SONGS ||
                                             currentTabId == LibraryTabId.ALBUMS ||
                                             currentTabId == LibraryTabId.ARTISTS ||
-                                            currentTabId == LibraryTabId.LIKED ||
-                                            (ENABLE_FOLDERS_STORAGE_FILTER && currentTabId == LibraryTabId.FOLDERS),
+                                            currentTabId == LibraryTabId.FOLDERS ||
+                                            currentTabId == LibraryTabId.LIKED,
                                     currentStorageFilter = playerUiState.currentStorageFilter,
                                     onStorageFilterClick = { playerViewModel.toggleStorageFilter() }
                                 )
@@ -1307,7 +1294,7 @@ fun LibraryScreen(
 
 
                             val isAlbumTab = currentTabId == LibraryTabId.ALBUMS
-                            val isFoldersTab = currentTabId == LibraryTabId.FOLDERS
+                            val isFoldersTab = false
                             val isPlaylistsTab = currentTabId == LibraryTabId.PLAYLISTS
 
                             LibrarySortBottomSheet(
@@ -1626,21 +1613,23 @@ fun LibraryScreen(
                                     }
 
                                     LibraryTabId.FOLDERS -> {
-                                        // Streaming-only: no filesystem folders exist.
-                                        // Show user-created playlists here instead.
-                                        LibraryPlaylistsTab(
-                                            playlistUiState = playlistUiState,
-                                            filteredPlaylists = visiblePlaylists,
-                                            navController = navController,
+                                        // Streaming-only: show artists here
+                                        val isLoading = playerUiState.isLoadingLibraryCategories
+                                        LibraryArtistsTab(
+                                            artists = artistsLazyPagingItems,
+                                            isLoading = isLoading,
                                             playerViewModel = playerViewModel,
                                             bottomBarHeight = bottomBarHeightDp,
+                                            currentArtistSortOption = playerUiState.currentArtistSortOption,
+                                            onArtistClick = { artistId ->
+                                                navController.navigateSafelyReplacing(
+                                                    route = Screen.ArtistDetail.createRoute(artistId),
+                                                    patternToPop = Screen.ArtistDetail.route
+                                                )
+                                            },
                                             isRefreshing = isRefreshing,
                                             onRefresh = onRefresh,
-                                            isSelectionMode = isPlaylistSelectionMode,
-                                            selectedPlaylistIds = selectedPlaylistIds,
-                                            onPlaylistLongPress = onPlaylistLongPress,
-                                            onPlaylistSelectionToggle = onPlaylistSelectionToggle,
-                                            onPlaylistOptionsClick = { showPlaylistMultiSelectionSheet = true }
+                                            storageFilter = playerUiState.currentStorageFilter
                                         )
                                     }
 
@@ -2745,7 +2734,7 @@ private fun LibraryTabId.iconRes(): Int = when (this) {
     LibraryTabId.ALBUMS -> R.drawable.rounded_album_24
     LibraryTabId.ARTISTS -> R.drawable.rounded_artist_24
     LibraryTabId.PLAYLISTS -> R.drawable.rounded_playlist_play_24
-    LibraryTabId.FOLDERS -> R.drawable.rounded_folder_24
+    LibraryTabId.FOLDERS -> R.drawable.rounded_artist_24
     LibraryTabId.LIKED -> R.drawable.round_favorite_24
 }
 
